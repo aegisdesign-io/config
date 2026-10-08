@@ -1,0 +1,11 @@
+---
+server:
+  port: 8080
+
+database:
+  driver:   postgres
+  hostname: localhost
+  port:     5432
+  username: postgres
+  password: dummy
+  name:     my_database

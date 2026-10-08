@@ -1,0 +1,69 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    outputs:
+      percent: ${{ steps.coverage.outputs.percent }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests with coverage
+        run: go test -v -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Compute coverage percentage
+        id: coverage
+        run: |
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $3); print $3}')
+          echo "Total coverage: ${pct}%"
+          echo "percent=${pct}" >> "$GITHUB_OUTPUT"
+          echo "### Coverage: ${pct}%" >> "$GITHUB_STEP_SUMMARY"
+
+  # Only this job can write to the repository, and it runs no project code.
+  badge:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish coverage badge
+        env:
+          PCT: ${{ needs.test.outputs.percent }}
+        run: |
+          color=$(awk -v p="$PCT" 'BEGIN { if (p >= 90) print "brightgreen"; else if (p >= 75) print "green"; else if (p >= 60) print "yellow"; else if (p >= 40) print "orange"; else print "red" }')
+          mkdir -p /tmp/badges
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' "$PCT" "$color" > /tmp/badges/coverage.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch origin badges; then
+            git checkout badges
+          else
+            git checkout --orphan badges
+            git rm -rf --quiet .
+          fi
+          cp /tmp/badges/coverage.json coverage.json
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "Coverage unchanged"
+          else
+            git commit -m "Update coverage badge: ${PCT}%"
+            git push origin badges
+          fi
